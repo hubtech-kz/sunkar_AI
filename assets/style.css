@@ -1,0 +1,80 @@
+:root {
+    --bg-color: #0d1117;
+    --card-bg: #161b22;
+    --accent-color: #58a6ff;
+    --danger-color: #f85149;
+    --success-color: #3fb950;
+    --warning-color: #d29922;
+    --text-color: #c9d1d9;
+}
+
+.stApp {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+}
+
+.main-header {
+    font-family: 'Inter', sans-serif;
+    background: linear-gradient(90deg, #58a6ff 0%, #bc8cff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 800;
+    font-size: 3rem;
+    margin-bottom: 0.5rem;
+}
+
+.sub-header {
+    color: #8b949e;
+    font-size: 1.1rem;
+    margin-bottom: 2rem;
+}
+
+.metric-card {
+    background-color: var(--card-bg);
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 1.5rem;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.metric-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    border-color: var(--accent-color);
+}
+
+.status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.status-danger {
+    background-color: rgba(248, 81, 73, 0.1);
+    color: var(--danger-color);
+    border: 1px solid var(--danger-color);
+}
+
+.status-success {
+    background-color: rgba(63, 185, 80, 0.1);
+    color: var(--success-color);
+    border: 1px solid var(--success-color);
+}
+
+div.stButton>button {
+    background: linear-gradient(45deg, #1f6feb 0%, #58a6ff 100%);
+    color: white;
+    border: none;
+    padding: 10px 24px;
+    border-radius: 8px;
+    font-weight: 600;
+    width: 100%;
+    transition: opacity 0.2s;
+}
+
+div.stButton>button:hover {
+    opacity: 0.9;
+    color: white;
+}

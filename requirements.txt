@@ -1,0 +1,14 @@
+streamlit
+google-generativeai
+python-whois
+python-nmap
+telethon
+pandas
+requests
+beautifulsoup4
+plotly
+python-dotenv
+streamlit-echarts
+selenium
+webdriver-manager
+googlesearch-python

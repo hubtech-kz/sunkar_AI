@@ -1,0 +1,16 @@
+venv/
+__pycache__/
+*.pyc
+.env
+*.zip
+*.db
+data/*.db
+temp_media.png
+.ipynb_checkpoints/
+.DS_Store
+node_modules/
+dist/
+build/
+.streamlit/
+chromedriver
+*.log
