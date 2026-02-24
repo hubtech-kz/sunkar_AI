@@ -423,46 +423,55 @@ elif menu_selection == t["menu"][3]: # Infrastructure Map / Network Intelligence
 
 elif menu_selection == t["menu"][4]: # Autonomous Hunter
     st.markdown(f'<h1 class="main-header">{t["menu"][4]}</h1>', unsafe_allow_html=True)
-    st.write("### specialized OSINT Auto-Pilot for active Казнет scanning.")
-    
-    if st.button("ЗАПУСТИТЬ АВТОНОМНЫЙ ПОИСК"):
-        with st.status("Сокол вышел на охоту (Scanning active domains)...", expanded=True) as status:
-            st.write("🛰️ Сканирование рекламных объявлений Instagram (KZ)...")
-            time.sleep(1.2)
-            st.write("🤖 Поиск по ключевым словам (Dorking): 'Инвестиции', 'Авиатор', 'Каспи Бонус'...")
-            time.sleep(1.5)
-            st.write("📊 Перекрестный анализ с базой АФМ/ДЭР...")
-            
-            found = hunter.proactive_search()
-            
-            # ANIMATION: Discover 100+ links rapidly
-            progress_container = st.empty()
-            link_ticker = st.empty()
-            
-            st.info(f"Начало активной фазы: Массовое обнаружение цифровых следов...")
-            
-            for i, link in enumerate(found):
-                # Speed animation: simulate high-speed discovery
-                progress_container.progress((i + 1) / len(found), text=f"Обнаружено: {i+1} / {len(found)}")
-                link_ticker.code(f"[{time.strftime('%H:%M:%S')}] FOUND: {link}")
-                time.sleep(0.02) # Very fast ticker
-            
-            st.success(f"Охота завершена. Найдено активных ресурсов: {len(found)}")
-            status.update(label="Scanning complete. Deep Analysis Queue initialized.", state="complete")
+    st.markdown("""
+    **🛰️ Autonomous Google Dorking → Deep OSINT Pipeline**  
+    Система сама ищет живые мошеннические ресурсы через Google Dorking, затем автоматически  
+    прогоняет каждый найденный URL через **Selenium + GPT-4o + Risk Score** и сохраняет в базу.
+    """)
 
+    if st.button("🦅 ЗАПУСТИТЬ АВТОНОМНУЮ ОХОТУ", type="primary"):
         st.markdown("---")
-        st.markdown("### 🎯 DISCOVERY LOG (Deep Analysis Ready)")
-        
-        # Display results with scrollable area or columns
-        for link in found[:10]: # Show top 10 for direct analysis
-            col_l, col_r = st.columns([4, 1])
-            col_l.code(link)
-            if col_r.button("АНАЛИЗ", key=f"hunt_{link}"):
-                st.session_state.url_input_auto = link
-                st.rerun()
-        
-        if len(found) > 10:
-            st.caption(f"... и еще {len(found)-10} подозрительных доменов добавлены в очередь мониторинга.")
+        st.markdown("### 📡 Live Intelligence Feed")
+        log_container = st.container()
+        log_lines = []
+
+        def stream_log(msg):
+            log_lines.append(msg)
+            with log_container:
+                for line in log_lines[-25:]:  # show last 25 lines
+                    st.markdown(line)
+
+        # Run full auto-pipeline
+        results = hunter.auto_investigate(
+            mapper=mapper,
+            vision=vision,
+            legal=legal,
+            db=db,
+            progress_callback=stream_log
+        )
+
+        # Results table
+        st.markdown("---")
+        st.markdown(f"### 🎯 Hunt Report — {len(results)} threats processed")
+        if results:
+            for r in results:
+                level = r.get('threat_level', 'Medium')
+                score = r.get('risk_score', 0)
+                color = "#f85149" if level == "High" else "#d29922" if level == "Medium" else "#3fb950"
+                with st.expander(f"{r.get('url', 'N/A')} | Risk: {score}/100 | {level}", expanded=False):
+                    col1, col2 = st.columns(2)
+                    col1.metric("Risk Score", f"{score}/100")
+                    col2.metric("Confidence", f"{r.get('confidence', 0)}%")
+                    st.markdown(f"**Scam Type:** {r.get('scam_type', 'N/A')}")
+                    st.markdown(f"**Articles:** `{', '.join(r.get('legal_articles', []))}`")
+                    st.markdown(f"**IP:** {r.get('ip', 'N/A')} | **Registrar:** {r.get('registrar', 'N/A')}")
+                    if r.get('indicators'):
+                        st.markdown("**AI Indicators:**")
+                        for ind in r['indicators']:
+                            st.write(f"• {ind}")
+        else:
+            st.info("Ничего не найдено. Возможно, Google ограничил запросы. Попробуйте через несколько минут.")
+
 
 elif menu_selection == t["menu"][5]: # History
     st.markdown(f'<h1 class="main-header">{t["history"]}</h1>', unsafe_allow_html=True)
