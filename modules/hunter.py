@@ -2,32 +2,45 @@
 import requests
 import socket
 import time as time_module
-import re
+import itertools
 
 try:
     from googlesearch import search as google_search
+    GOOGLE_AVAILABLE = True
 except ImportError:
-    google_search = None
+    GOOGLE_AVAILABLE = False
 
 
 class SunkarHunter:
     def __init__(self):
-        # Real OSINT Footprints (Dorks) targeting known scam patterns in KZ
+        # Google Dorks (used if Google works, as a supplement)
         self.dorks = [
             'site:.xyz "kaspi" "бонус"',
-            'inurl:aviator "казахстан" "ойнау"',
+            'inurl:aviator "казахстан"',
             '"казино" "казахстан" site:.digital',
             'site:.online "halyk" "выплата"',
             '"invest" "kz" "пассивный доход" site:.com',
-            '"aviator" "получить" "kz" site:.top',
-            '"casino" "казахстан" "бонус" site:.xyz',
-            '"poker" OR "pokies" "kz" "зеркало"',
+        ]
+
+        # ─── PROFESSIONAL DOMAIN PATTERN ENGINE ───────────────────────────────
+        # Known scam brand prefixes and suffixes used in KZ criminal ecosystem
+        self._brand_prefixes = [
+            "1xbet", "mostbet", "melbet", "pin-up", "pinup", "pokerdom",
+            "admiral", "vulkan", "casino", "aviator", "slot", "lucky", "bet",
+            "win", "boom", "kz-casino", "kaspi-win", "bonus-kz", "invest-kz",
+        ]
+        self._brand_suffixes = [
+            "-kz", "kz", "-kazahstan", "-online", "-mirror", "-login",
+            "2025", "2026", "-official", "-games", "-play", "-club",
+        ]
+        self._tlds = [
+            ".top", ".xyz", ".digital", ".online", ".site",
+            ".live", ".bet", ".win", ".casino",
         ]
 
     # ─── HELPERS ────────────────────────────────────────────────────────────
 
     def domain_resolves(self, url):
-        """DNS check — domain must actually exist."""
         try:
             domain = url.replace("https://", "").replace("http://", "").split("/")[0]
             socket.gethostbyname(domain)
@@ -36,42 +49,73 @@ class SunkarHunter:
             return False
 
     def check_live(self, url):
-        """HTTP check — server must respond."""
         try:
-            r = requests.get(
-                url, timeout=5, headers={"User-Agent": "Mozilla/5.0"}, allow_redirects=True
-            )
+            r = requests.get(url, timeout=4, headers={"User-Agent": "Mozilla/5.0"}, allow_redirects=True)
             return r.status_code < 400
         except Exception:
             return False
 
-    # ─── DISCOVERY ─────────────────────────────────────────────────────────
+    # ─── DOMAIN PATTERN GENERATOR ─────────────────────────────────────────
 
-    def discover_candidates(self, max_per_dork=3, progress_callback=None):
+    def generate_candidate_domains(self, max_candidates=50, progress_callback=None):
         """
-        Real-time discovery via Google Dorking.
-        Returns a list of live URLs that passed DNS + HTTP check.
+        Generates likely scam domain candidates based on known patterns
+        in the Kazakhstan criminal domain ecosystem.
+        Validates each via DNS + HTTP.
         """
+        candidates = []
+        checked = 0
+
+        if progress_callback:
+            progress_callback("🧬 **Generating domain pattern candidates** from known KZ scam ecosystem...")
+
+        # Generate combinations
+        combos = []
+        for prefix in self._brand_prefixes:
+            for tld in self._tlds:
+                combos.append(f"https://{prefix}{tld}")
+            for suffix in self._brand_suffixes:
+                for tld in self._tlds:
+                    combos.append(f"https://{prefix}{suffix}{tld}")
+
+        # Shuffle and limit
+        import random
+        random.shuffle(combos)
+        combos = combos[:max_candidates * 3]  # check 3x more than target
+
+        for url in combos:
+            if len(candidates) >= max_candidates:
+                break
+            checked += 1
+
+            if self.domain_resolves(url):
+                if self.check_live(url):
+                    candidates.append(url)
+                    if progress_callback:
+                        progress_callback(f"✅ Live target discovered: `{url}`")
+
+        if progress_callback:
+            progress_callback(f"🔬 Checked {checked} domain patterns, found {len(candidates)} live targets.")
+
+        return candidates
+
+    # ─── GOOGLE DORKING (supplement if available) ─────────────────────────
+
+    def discover_via_google(self, max_per_dork=3, progress_callback=None):
+        if not GOOGLE_AVAILABLE:
+            return []
         candidates = set()
-
-        if not google_search:
-            return list(candidates)
-
         for i, dork in enumerate(self.dorks):
             if progress_callback:
-                progress_callback(f"🔍 Dork {i+1}/{len(self.dorks)}: `{dork[:60]}...`")
+                progress_callback(f"🔍 Dork {i+1}/{len(self.dorks)}: `{dork[:60]}`")
             try:
                 for url in google_search(dork, num_results=max_per_dork, lang="kk"):
-                    if url not in candidates and self.domain_resolves(url) and self.check_live(url):
+                    if url not in candidates and self.domain_resolves(url):
                         candidates.add(url)
-                        if progress_callback:
-                            progress_callback(f"✅ Found live target: `{url}`")
             except Exception:
-                # Google may rate-limit — skip and continue
                 time_module.sleep(2)
                 continue
-            time_module.sleep(1.5)  # Be polite to Google
-
+            time_module.sleep(1)
         return list(candidates)
 
     # ─── AUTO-PIPELINE ──────────────────────────────────────────────────────
@@ -79,30 +123,34 @@ class SunkarHunter:
     def auto_investigate(self, mapper, vision, legal, db, progress_callback=None):
         """
         Full autonomous investigation pipeline:
-        1. Google Dorking → live URL candidates
+        1. Domain Pattern Generation + Google Dorking (if available) → live candidates
         2. Selenium scraping (bypass Cloudflare)
         3. GPT-4o analysis → threat_level, scam_type, indicators
         4. Rule-based Risk Score (0–100)
-        5. Save to DB
-        Returns: list of result dicts
+        5. Save to DB automatically
         """
         all_results = []
 
-        # STEP 1: Discovery
         if progress_callback:
-            progress_callback("🛰️ **STEP 1:** Starting Google Dorking discovery...")
+            progress_callback("🛰️ **PHASE 1:** Domain intelligence gathering...")
 
-        candidates = self.discover_candidates(progress_callback=progress_callback)
+        # METHOD A: Pattern-based candidate generation (always works)
+        candidates = set(self.generate_candidate_domains(max_candidates=15, progress_callback=progress_callback))
+
+        # METHOD B: Google Dorking (if available, as supplement)
+        google_hits = self.discover_via_google(progress_callback=progress_callback)
+        candidates.update(google_hits)
+
+        candidates = list(candidates)
 
         if not candidates:
             if progress_callback:
-                progress_callback("⚠️ No live targets found via Dorking. Possible Google rate-limit.")
+                progress_callback("⚠️ No live domains found. Check your network connection.")
             return []
 
         if progress_callback:
-            progress_callback(f"🎯 Found **{len(candidates)}** live targets. Beginning deep scan...")
+            progress_callback(f"\n🎯 **PHASE 2:** Found **{len(candidates)}** live targets. Starting deep OSINT scan...")
 
-        # STEP 2-5: Deep scan per URL
         for url in candidates:
             try:
                 if progress_callback:
@@ -112,20 +160,26 @@ class SunkarHunter:
                 mapper_data = mapper.analyze_url(url)
                 domain = mapper_data.get('domain', url)
 
-                # Selenium web scrape
+                # Selenium/HTTP web scrape
                 if progress_callback:
-                    progress_callback(f"  🌐 Headless browser loading...")
+                    progress_callback(f"  🌐 Loading page via Headless Browser...")
                 web_data = mapper.get_website_content(url)
                 context = {**mapper_data, **web_data}
 
                 # GPT-4o analysis
                 if progress_callback:
-                    progress_callback(f"  🤖 GPT-4o analyzing content...")
+                    progress_callback(f"  🤖 Running GPT-4o threat analysis...")
                 vision_result = vision.analyze_text(context)
-
-                # Risk scoring
                 threat_level = vision_result.get('threat_level', 'Medium')
                 indicators = vision_result.get('indicators', [])
+
+                # Skip obviously safe results
+                if threat_level == "Low" and not indicators:
+                    if progress_callback:
+                        progress_callback(f"  🟢 Clean — skipping.")
+                    continue
+
+                # Risk scoring
                 risk_result = legal.compute_risk_score(indicators, domain=domain, threat_level=threat_level)
                 legal_articles = legal.qualify_offense(indicators, domain=domain)
                 if risk_result['articles']:
@@ -147,27 +201,31 @@ class SunkarHunter:
                     'matched_rules': risk_result['matched_rules'],
                 }
 
-                # Save to DB immediately
                 db.log_incident(result)
 
-                level_emoji = "🔴" if threat_level == "High" else "🟡" if threat_level == "Medium" else "🟢"
+                level_emoji = "🔴" if threat_level == "High" else "🟡"
                 if progress_callback:
                     progress_callback(
-                        f"  {level_emoji} **Verdict:** {threat_level} | **Risk:** {risk_result['score']}/100 | {', '.join(legal_articles[:2])}"
+                        f"  {level_emoji} **{threat_level}** | Risk: **{risk_result['score']}/100** | "
+                        f"`{', '.join(legal_articles[:2]) or 'Checking...'}`"
                     )
 
                 all_results.append(result)
 
             except Exception as e:
                 if progress_callback:
-                    progress_callback(f"  ⚠️ Failed to analyze `{url}`: {str(e)[:80]}")
+                    progress_callback(f"  ⚠️ Error scanning `{url}`: {str(e)[:100]}")
                 continue
 
         if progress_callback:
-            progress_callback(f"\n✅ **Hunt complete.** Analyzed {len(all_results)} threats. Results saved to database.")
+            high_count = sum(1 for r in all_results if r.get('threat_level') == 'High')
+            progress_callback(
+                f"\n\n✅ **Hunt Complete.** "
+                f"Analyzed: **{len(all_results)}** | 🔴 High Threats: **{high_count}** | Saved to DB."
+            )
 
         return all_results
 
-    # Legacy method kept for compatibility
+    # Legacy compatibility
     def proactive_search(self):
-        return self.discover_candidates()
+        return self.generate_candidate_domains()
