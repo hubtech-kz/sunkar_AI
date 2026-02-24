@@ -236,9 +236,21 @@ if menu_selection == t["menu"][0]: # Dashboard
                     all_indicators = results.get('vision', {}).get('indicators', [])\
                         if results.get('vision', {}).get('indicators') else []
                     domain_for_analysis = results.get('mapper', {}).get('domain', '') if 'mapper' in results else ''
+                    threat_level = results.get('vision', {}).get('threat_level', 'Medium')
                     results['indicators'] = all_indicators
                     results['legal_articles'] = legal.qualify_offense(all_indicators, domain=domain_for_analysis)
-                    results['threat_level'] = results.get('vision', {}).get('threat_level', 'Medium')
+                    results['threat_level'] = threat_level
+
+                    # ✅ NEW: Rule-based risk scoring with explainability
+                    risk_result = legal.compute_risk_score(all_indicators, domain=domain_for_analysis, threat_level=threat_level)
+                    results['risk_score'] = risk_result['score']
+                    results['confidence'] = risk_result['confidence']
+                    results['matched_rules'] = risk_result['matched_rules']
+                    # Merge article qualification from rule engine too
+                    if risk_result['articles']:
+                        combined_articles = list(set(results['legal_articles'] + risk_result['articles']))
+                        results['legal_articles'] = combined_articles
+
                     results['explanation'] = results.get('vision', {}).get('explanation', '')
                     results['scam_type'] = results.get('vision', {}).get('scam_type', 'Detection')
                     results['ip'] = results.get('mapper', {}).get('ip', 'N/A') if 'mapper' in results else 'N/A'
@@ -256,30 +268,82 @@ if menu_selection == t["menu"][0]: # Dashboard
         st.markdown(f"#### {t['verdict']}")
         if "recon_done" in st.session_state and st.session_state.recon_done:
             res = st.session_state.current_results
-            
-            # 1. ОПРЕДЕЛЯЕМ ЦВЕТ И СТАТУС
+
+            # ── 1. STATUS BANNER ──────────────────────────────────────────────
             if res.get('threat_level') == "High":
-                st.error(f"{t['threat_detected']}: {res['scam_type']}")
+                st.error(f"🚨 THREAT DETECTED: {res.get('scam_type', '')}")
             elif res.get('threat_level') == "Low" or "Compliance" in str(res.get('legal_articles', '')):
-                st.success(f"✅ SAFE / ТАЗА: {res['scam_type']}")
+                st.success(f"✅ SAFE / ТАЗА: {res.get('scam_type', '')}")
             else:
-                st.warning(f"{t['suspicious']}: {res['scam_type']}")
-            
-            # 2. ОТОБРАЖАЕМ КВАЛИФИКАЦИЮ И ДОВЕРИЕ
+                st.warning(f"⚠️ {t['suspicious']}: {res.get('scam_type', '')}")
+
+            # ── 2. RISK SCORE GAUGE ───────────────────────────────────────────
+            risk_score = res.get('risk_score', 0)
+            confidence = res.get('confidence', 0)
+            if risk_score >= 75:
+                score_color = "#f85149"
+                score_label = "КРИТИЧЕСКИЙ"
+            elif risk_score >= 50:
+                score_color = "#d29922"
+                score_label = "ВЫСОКИЙ"
+            elif risk_score >= 25:
+                score_color = "#58a6ff"
+                score_label = "СРЕДНИЙ"
+            else:
+                score_color = "#3fb950"
+                score_label = "НИЗКИЙ"
+
+            st.markdown(f"""
+            <div style="background:#161b22;border:1px solid #30363d;border-radius:10px;padding:16px;margin-bottom:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <div style="font-size:12px;color:#8b949e;">RISK SCORE</div>
+                        <div style="font-size:42px;font-weight:900;color:{score_color};line-height:1;">{risk_score}</div>
+                        <div style="font-size:11px;color:{score_color};">{score_label}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:12px;color:#8b949e;">CONFIDENCE</div>
+                        <div style="font-size:32px;font-weight:700;color:#c9d1d9;">{confidence}%</div>
+                        <div style="font-size:11px;color:#8b949e;">{t['legal']}</div>
+                    </div>
+                </div>
+                <div style="margin-top:10px;background:#21262d;border-radius:6px;height:10px;">
+                    <div style="background:{score_color};width:{risk_score}%;height:10px;border-radius:6px;"></div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # ── 3. LEGAL QUALIFICATION ────────────────────────────────────────
             legal_text = ", ".join(res.get('legal_articles', []))
-            st.markdown(f"**{t['legal']}:** {legal_text}")
-            
-            # Если это официальный ресурс, доверие 100%, если подозрительный — 97%
-            conf_val = 100 if res.get('threat_level') == "Low" else 97
-            st.markdown(f"**{t['confidence']}:** {conf_val}%")
-            
-            st.markdown(f"**{t['markers']}:**")
-            for ind in res.get('vision', {}).get('indicators', []):
-                st.write(f"- {ind}")
-            
+            st.markdown(f"**⚖️ {t['legal']}:** `{legal_text}`")
+
+            # ── 4. EXPLAINABILITY LAYER ───────────────────────────────────────
+            matched_rules = res.get('matched_rules', [])
+            if matched_rules:
+                with st.expander("📋 Explainability — Какие признаки → Какая статья", expanded=True):
+                    for rule in matched_rules:
+                        article = rule.get('article') or '⚠️ Дополнительный риск-фактор'
+                        weight = rule.get('weight', 0)
+                        label = rule.get('label', '')
+                        color = "#f85149" if weight >= 30 else "#d29922"
+                        st.markdown(
+                            f"<div style='padding:4px 8px;margin:3px 0;border-left:3px solid {color};font-size:13px;'>"
+                            f"<b style='color:{color}'>[+{weight} pts]</b> {label} "
+                            f"<code style='float:right;font-size:11px;'>{article}</code></div>",
+                            unsafe_allow_html=True
+                        )
+
+            # ── 5. AI INDICATORS ──────────────────────────────────────────────
+            ai_indicators = res.get('vision', {}).get('indicators', [])
+            if ai_indicators:
+                with st.expander("🤖 AI Indicators (GPT-4o)"):
+                    for ind in ai_indicators:
+                        st.write(f"• {ind}")
+
+            # ── 6. REPORT GENERATION ──────────────────────────────────────────
             if st.button(t["gen_report"]):
                 report = legal.generate_report(res)
-                st.download_button("Download Report (TXT)", report, file_name="sunqar_report.txt")
+                st.download_button("📥 Download Report (.txt)", report, file_name="sunqar_report.txt")
                 st.markdown("### Report Preview")
                 st.code(report)
         else:
@@ -313,14 +377,49 @@ elif menu_selection == t["menu"][2]: # Bot Investigator
     else:
         st.info("Run a Telegram analysis: enter a `https://t.me/` link in the Dashboard and click 'Run'.")
 
-elif menu_selection == t["menu"][3]: # Infrastructure Map
+elif menu_selection == t["menu"][3]: # Infrastructure Map / Network Intelligence
     st.markdown(f'<h1 class="main-header">{t["menu"][3]}</h1>', unsafe_allow_html=True)
-    if "current_results" in st.session_state and "mapper" in st.session_state.current_results:
-        m = st.session_state.current_results['mapper']
-        st.json(m)
-        st.info("Technical markers matched with existing criminal clusters.")
-    else:
-        st.write("Run a URL analysis to map infrastructure.")
+    
+    tab1, tab2 = st.tabs(["🗺️ OSINT Footprint", "🕸️ Network Intelligence"])
+    
+    with tab1:
+        if "current_results" in st.session_state and "mapper" in st.session_state.current_results:
+            m = st.session_state.current_results['mapper']
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.metric("IP Address", m.get("ip", "N/A"))
+                st.metric("Domain Age", m.get("age", "N/A"))
+                st.metric("Registrar", m.get("registrar", "N/A"))
+            with col_b:
+                st.metric("Domain", m.get("domain", "N/A"))
+                risk = st.session_state.current_results.get("risk_score", 0)
+                st.metric("Risk Score", f"{risk}/100")
+            st.markdown("#### 🔍 Digital Markers (Trackers)")
+            markers = m.get("markers", [])
+            if markers and markers != ["No trackers detected"]:
+                for mk in markers:
+                    st.warning(f"📡 {mk}")
+            else:
+                st.info("No tracking beacons detected on this domain.")
+        else:
+            st.info("Run a URL analysis first to map its infrastructure.")
+    
+    with tab2:
+        st.markdown("### 🕸️ Scam Network Clusters")
+        st.caption("Domains sharing the same IP address are grouped as potential scam networks/clusters.")
+        clusters = db.get_network_clusters()
+        if clusters:
+            for i, cluster in enumerate(clusters, 1):
+                risk_color = "#f85149" if cluster['avg_risk_score'] >= 50 else "#d29922"
+                with st.expander(f"🔴 Cluster #{i} — IP: {cluster['shared_ip']} ({cluster['count']} domains)", expanded=i==1):
+                    st.markdown(f"**Avg. Risk Score:** <span style='color:{risk_color};font-size:18px;font-weight:bold;'>{cluster['avg_risk_score']}/100</span>", unsafe_allow_html=True)
+                    st.markdown(f"**Scam Types:** {', '.join(cluster['scam_types'])}")
+                    st.markdown("**Linked Domains:**")
+                    for d in cluster['domains']:
+                        st.code(d)
+        else:
+            st.info("No clusters detected yet. Analyze multiple URLs to build network intelligence. Clusters form when two or more domains share the same server IP.")
+
 
 elif menu_selection == t["menu"][4]: # Autonomous Hunter
     st.markdown(f'<h1 class="main-header">{t["menu"][4]}</h1>', unsafe_allow_html=True)

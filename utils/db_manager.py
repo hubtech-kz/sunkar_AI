@@ -21,9 +21,22 @@ class DBManager:
                 scam_type TEXT,
                 indicators TEXT,
                 ip TEXT,
-                legal_articles TEXT
+                legal_articles TEXT,
+                risk_score INTEGER DEFAULT 0,
+                confidence REAL DEFAULT 0.0,
+                registrar TEXT,
+                markers TEXT
             )
         ''')
+        # Migration: add new columns to existing databases
+        for col, coltype in [("risk_score", "INTEGER DEFAULT 0"),
+                              ("confidence", "REAL DEFAULT 0.0"),
+                              ("registrar", "TEXT"),
+                              ("markers", "TEXT")]:
+            try:
+                cursor.execute(f"ALTER TABLE incidents ADD COLUMN {col} {coltype}")
+            except Exception:
+                pass
         conn.commit()
         conn.close()
 
@@ -31,15 +44,19 @@ class DBManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO incidents (source, threat_level, scam_type, indicators, ip, legal_articles)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO incidents (source, threat_level, scam_type, indicators, ip, legal_articles, risk_score, confidence, registrar, markers)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             data.get('url', 'Upload'),
             data.get('threat_level'),
             data.get('scam_type'),
             ", ".join(data.get('indicators', [])),
             data.get('ip'),
-            ", ".join(data.get('legal_articles', []))
+            ", ".join(data.get('legal_articles', [])),
+            data.get('risk_score', 0),
+            data.get('confidence', 0.0),
+            data.get('registrar', 'N/A'),
+            ", ".join(data.get('markers', []))
         ))
         conn.commit()
         conn.close()
@@ -78,3 +95,34 @@ class DBManager:
             "clusters": clusters,
             "precision": precision,
         }
+
+    def get_network_clusters(self):
+        """
+        Network Intelligence: finds scam clusters — domains sharing the same IP.
+        Returns list of cluster dicts.
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT ip, GROUP_CONCAT(source, '||'), GROUP_CONCAT(scam_type, '||'), AVG(risk_score), COUNT(*)
+            FROM incidents
+            WHERE ip IS NOT NULL AND ip != 'N/A' AND threat_level != 'Low'
+            GROUP BY ip
+            HAVING COUNT(*) >= 1
+            ORDER BY COUNT(*) DESC
+        ''')
+        rows = cursor.fetchall()
+        conn.close()
+        clusters = []
+        for row in rows:
+            ip, sources, types, avg_score, count = row
+            cluster_domains = list(set(s.strip() for s in (sources or '').split('||') if s.strip()))
+            cluster_types = list(set(t.strip() for t in (types or '').split('||') if t.strip()))
+            clusters.append({
+                "shared_ip": ip,
+                "domains": cluster_domains,
+                "scam_types": cluster_types,
+                "avg_risk_score": round(avg_score or 0),
+                "count": count,
+            })
+        return clusters
